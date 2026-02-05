@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Login | Krypto$</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container auth-page">
+    <div class="top-bar" style="width: 100%;">
+        <a href="/" class="auth-btn">Home</a>
+        <a href="/login" class="auth-btn secondary">User Login</a>
+    </div>
+
+    <h1 class="app-title">Krypto$</h1>
+
+    <div class="auth-container">
+        <h2>Admin Login</h2>
+
+    {% if error %}
+        <p class="error-msg" role="alert" aria-live="polite">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('admin_login') }}">
+
+        <div class="form-group">
+            <label for="admin-username" style="display:block; text-align:left; margin-bottom:6px;">Admin Username</label>
+            <input id="admin-username" type="text" name="username" placeholder="Admin Username" required>
+        </div>
+        <div class="form-group">
+            <label for="admin-password" style="display:block; text-align:left; margin-bottom:6px;">Password</label>
+            <input id="admin-password" type="password" name="password" placeholder="Password" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;">Login</button>
+    </form>
+
+    <div style="text-align:center; margin-top:14px;">
+        <a href="/" class="auth-btn secondary">⬅ Back to Home</a>
+    </div>
+    </div>
+</div>
+</body>
+</html>

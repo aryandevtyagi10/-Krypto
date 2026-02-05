@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Krypto$</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+<div class="container">
+
+    <!-- TOP RIGHT AUTH BUTTONS -->
+    <div class="top-bar">
+        <a href="/favorites" class="auth-btn">Favorites</a>
+        <a href="/login" class="auth-btn">Login</a>
+        <a href="/signup" class="auth-btn secondary">Sign Up</a>
+        <a href="/admin/login" class="auth-btn">Admin</a>
+    </div>
+
+    <!-- APP TITLE -->
+    <h1 class="app-title">Krypto$</h1>
+
+    <!-- SEARCH -->
+    <form method="post" action="/search">
+        <input type="text" name="search" placeholder="Search coin (e.g. bitcoin)">
+        <button type="submit" class="btn btn-accent">Search</button>
+    </form>
+
+    <br>
+
+    <!-- 🔥 TOP 10 DASHBOARD -->
+    {% if search_results|length == 0 %}
+    <h2 style="text-align:center;">🔥 Top 10 Cryptocurrencies</h2>
+
+    <table>
+        <tr>
+            <th>#</th>
+            <th>Coin</th>
+            <th>Price (USD)</th>
+        </tr>
+
+        {% for coin in top_coins %}
+        <tr>
+            <td>#{{ loop.index }}</td>
+            <td>
+                <a href="/coin/{{ coin.id }}">
+                    {{ coin.name }} ({{ coin.symbol | upper }})
+                </a>
+            </td>
+            <td>${{ "{:,.2f}".format(coin.current_price) }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    <!-- 🔍 SEARCH RESULTS -->
+    {% if search_results|length > 0 %}
+    <h2 style="margin-top:40px;">🔍 Search Results</h2>
+
+    <table>
+        <tr>
+            <th>Coin</th>
+            <th>Symbol</th>
+        </tr>
+
+        {% for coin in search_results %}
+        <tr>
+            <td>
+                <a href="/coin/{{ coin.id }}">{{ coin.name }}</a>
+            </td>
+            <td>{{ coin.symbol | upper }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <div style="text-align:center; margin-top:15px;">
+        <a href="/" style="opacity:0.8;">⬅ Back to Top 10</a>
+    </div>
+    {% endif %}
+
+</div>
+</body>
+</html>

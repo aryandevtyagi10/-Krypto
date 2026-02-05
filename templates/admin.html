@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Krypto$ Admin Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+
+    <div class="top-bar">
+        <a href="/" class="auth-btn">Home</a>
+        <a href="/admin/logout" class="auth-btn secondary">Logout</a>
+    </div>
+
+    <h1 class="app-title">Krypto$ Admin Dashboard</h1>
+
+    <p style="text-align:center;">
+        <span class="badge">Total Users: {{ total_users }}</span>
+    </p>
+
+    <table>
+        <tr>
+            <th>Username</th>
+            <th>Email</th>
+            <th>Created At</th>
+        </tr>
+
+        {% for user in users %}
+        <tr>
+            <td>{{ user.username }}</td>
+            <td>{{ user.email }}</td>
+            <td>{{ user.created_at }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    {% if total_users == 0 %}
+        <p style="text-align:center; opacity:0.7;">
+            No users registered yet
+        </p>
+    {% endif %}
+
+    <div style="margin-top: 40px; padding-top: 20px;">
+        <div class="card" style="max-width: 480px; margin: 0 auto;">
+            <div class="section-title">⚙️ Admin Settings</div>
+            <form action="/admin/update_credentials" method="POST">
+                <div class="form-group">
+                    <label for="new_username" style="display:block; text-align:left; margin-bottom:6px;">New Admin Username</label>
+                    <input id="new_username" type="text" name="new_username" placeholder="Leave blank to keep current">
+                </div>
+                <div class="form-group">
+                    <label for="new_password" style="display:block; text-align:left; margin-bottom:6px;">New Admin Password</label>
+                    <input id="new_password" type="password" name="new_password" placeholder="Leave blank to keep current">
+                </div>
+                <button type="submit" class="btn btn-accent" style="width: 100%; margin-top: 10px;">Update Credentials</button>
+            </form>
+        </div>
+    </div>
+
+    <div style="text-align:center; margin: 20px;">
+        <a href="/" class="btn btn-primary">⬅ Back to Home</a>
+    </div>
+
+</div>
+</body>
+</html>

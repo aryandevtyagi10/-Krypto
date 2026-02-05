@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign Up | Krypto$</title>
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+<div class="container auth-page">
+
+    <!-- Top Navigation -->
+    <div class="top-bar" style="width: 100%;">
+        <a href="/" class="auth-btn">Home</a>
+        <a href="/favorites" class="auth-btn secondary">Favorites</a>
+        <a href="/login" class="auth-btn secondary">Login</a>
+    </div>
+
+    <!-- App Title -->
+    <h1 class="app-title">Krypto$</h1>
+
+    <!-- Signup Card -->
+    <div class="auth-container">
+        <h2>Create Account</h2>
+
+       <form method="post" aria-describedby="signup-help">
+            <div class="form-group">
+                <label for="username" style="display:block; text-align:left; margin-bottom:6px;">Username</label>
+                <input id="username" type="text" name="username" placeholder="Choose a username" required>
+            </div>
+            <div class="form-group">
+                <label for="email" style="display:block; text-align:left; margin-bottom:6px;">Email</label>
+                <input id="email" type="email" name="email" placeholder="you@example.com" required>
+            </div>
+            <div class="form-group">
+                <label for="password" style="display:block; text-align:left; margin-bottom:6px;">Password</label>
+                <input id="password" type="password" name="password" placeholder="Create a strong password" required>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width:100%;">Create Account</button>
+            <div id="signup-help" class="auth-link" style="text-align:left; margin-top:10px;">
+                You will receive alert emails to the address provided.
+            </div>
+        </form>
+
+{% if error %}
+<p class="error-msg" role="alert" aria-live="polite">{{ error }}</p>
+{% endif %}
+
+
+
+        <p class="auth-link">
+            Already have an account?
+            <a href="/login">Login</a>
+        </p>
+    </div>
+
+</div>
+</body>
+</html>

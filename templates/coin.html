@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ coin.name }} ({{ coin.symbol | upper }})</title>
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+<div class="container coin-page">
+
+    <!-- Top Navigation -->
+    <div class="top-bar">
+        <a href="/" class="auth-btn">Home</a>
+        <a href="/favorites" class="auth-btn secondary">Favorites</a>
+        <a href="/login" class="auth-btn">Login</a>
+        <a href="/signup" class="auth-btn secondary">Sign Up</a>
+    </div>
+
+    <!-- Coin Title -->
+    <h1 class="coin-title">
+        {{ coin.name }} ({{ coin.symbol | upper }})
+    </h1>
+
+    <!-- Favorites Button -->
+    <div class="favorite-action">
+        {% if is_favorite %}
+            <a href="/remove_favorite/{{ coin.id }}"
+               class="fav-btn-large"
+               style="background:#ff4444;">
+                ❌ Remove from Favorites
+            </a>
+        {% else %}
+            <a href="/add_favorite/{{ coin.id }}"
+               class="fav-btn-large">
+                ⭐ Add to Favorites
+            </a>
+        {% endif %}
+    </div>
+
+    <!-- ================= CHART ================= -->
+{% if labels|length > 0 and values|length > 0 %}
+<div class="chart-container">
+    <canvas id="priceChart"></canvas>
+</div>
+
+<script>
+const labels = {{ labels | tojson }};
+const values = {{ values | tojson }};
+
+new Chart(document.getElementById("priceChart"), {
+    type: "line",
+    data: {
+        labels: labels,
+        datasets: [{
+            label: "Price (USD)",
+            data: values,
+            borderColor: "#ffd700",
+            backgroundColor: "rgba(255,215,0,0.2)",
+            borderWidth: 2,
+            tension: 0.4,
+            pointRadius: 2,
+            fill: true
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { color: "#fff" } },
+            y: {
+                ticks: {
+                    color: "#fff",
+                    callback: v => "$" + v.toLocaleString()
+                }
+            }
+        }
+    }
+});
+</script>
+{% else %}
+<p style="text-align:center; margin:20px;">
+⚠ Chart data unavailable for this asset
+</p>
+{% endif %}
+
+    <!-- ================= STATS ================= -->
+    <div class="stats">
+        <p><b>Market Rank:</b> {{ coin.market_cap_rank or "N/A" }}</p>
+
+<p><b>Current Price:</b>
+{% if coin.market_data and coin.market_data.current_price %}
+    ${{ coin.market_data.current_price.usd }}
+{% else %}
+    N/A
+{% endif %}
+</p>
+
+<p><b>Market Cap:</b>
+{% if coin.market_data and coin.market_data.market_cap %}
+    ${{ coin.market_data.market_cap.usd }}
+{% else %}
+    N/A
+{% endif %}
+</p>
+
+<p><b>24h High:</b>
+{% if coin.market_data and coin.market_data.high_24h %}
+    ${{ coin.market_data.high_24h.usd }}
+{% else %}
+    N/A
+{% endif %}
+</p>
+
+<p><b>24h Low:</b>
+{% if coin.market_data and coin.market_data.low_24h %}
+    ${{ coin.market_data.low_24h.usd }}
+{% else %}
+    N/A
+{% endif %}
+</p>
+
+    </div>
+
+    <!-- Back to Home -->
+    <div style="text-align:center; margin-top: 16px;">
+        <a href="/" class="btn btn-primary">⬅ Back to Home</a>
+    </div>
+
+</div>
+</body>
+</html>
