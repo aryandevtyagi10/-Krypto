@@ -7,12 +7,10 @@ import time
 import threading
 import os
 from dotenv import load_dotenv
+from collections import defaultdict
 
+# ================== ENV ==================
 load_dotenv()
-
-# ================== CONFIG ==================
-
-# Admin credentials stored in DynamoDB (AdminConfig table)
 
 REGION = "us-east-1"
 USERS_TABLE = "Users"
@@ -24,7 +22,6 @@ app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "super_secret_key_for_crypto_app")
 
 # ================== AWS CLIENTS ==================
-
 dynamodb = boto3.resource("dynamodb", region_name=REGION)
 sns = boto3.client("sns", region_name=REGION)
 
@@ -32,356 +29,229 @@ users_table = dynamodb.Table(USERS_TABLE)
 alerts_table = dynamodb.Table(ALERTS_TABLE)
 admin_config_table = dynamodb.Table(ADMIN_CONFIG_TABLE)
 
-# Check if Admin Config table exists, if not, create it
-try:
-    dynamodb.meta.client.describe_table(TableName=ADMIN_CONFIG_TABLE)
-except Exception:
+# ================== DYNAMODB SETUP ==================
+def ensure_table(name, key_schema, attr_defs):
     try:
+        dynamodb.meta.client.describe_table(TableName=name)
+    except Exception:
         table = dynamodb.create_table(
-            TableName=ADMIN_CONFIG_TABLE,
-            KeySchema=[
-                {"AttributeName": "config_id", "KeyType": "HASH"}
-            ],
-            AttributeDefinitions=[
-                {"AttributeName": "config_id", "AttributeType": "S"}
-            ],
+            TableName=name,
+            KeySchema=key_schema,
+            AttributeDefinitions=attr_defs,
             BillingMode="PAY_PER_REQUEST"
         )
         table.wait_until_exists()
-        print("Created AdminConfig table")
-        
-        # Initialize with default credentials
-        admin_config_table.put_item(Item={
-            "config_id": "main",
-            "username": "admin",
-            "password": "admin123"
-        })
-    except Exception as e:
-        print(f"Failed to create AdminConfig table: {e}")
+        print(f"Created table: {name}")
 
-# Check if Alerts table exists, if not, create it (Simplified check)
+ensure_table(
+    ADMIN_CONFIG_TABLE,
+    [{"AttributeName": "config_id", "KeyType": "HASH"}],
+    [{"AttributeName": "config_id", "AttributeType": "S"}]
+)
+
+ensure_table(
+    ALERTS_TABLE,
+    [
+        {"AttributeName": "email", "KeyType": "HASH"},
+        {"AttributeName": "coin", "KeyType": "RANGE"}
+    ],
+    [
+        {"AttributeName": "email", "AttributeType": "S"},
+        {"AttributeName": "coin", "AttributeType": "S"}
+    ]
+)
+
+# Default admin config
 try:
-    dynamodb.meta.client.describe_table(TableName=ALERTS_TABLE)
-except Exception:
-    try:
-        table = dynamodb.create_table(
-            TableName=ALERTS_TABLE,
-            KeySchema=[
-                {"AttributeName": "email", "KeyType": "HASH"},
-                {"AttributeName": "coin", "KeyType": "RANGE"}
-            ],
-            AttributeDefinitions=[
-                {"AttributeName": "email", "AttributeType": "S"},
-                {"AttributeName": "coin", "AttributeType": "S"}
-            ],
-            BillingMode="PAY_PER_REQUEST"
-        )
-        table.wait_until_exists()
-        print("Created Alerts table")
-    except Exception as e:
-        print(f"Failed to create Alerts table: {e}")
-        
-# ... SNS Init ...
+    admin_config_table.put_item(
+        Item={"config_id": "main", "username": "admin", "password": "admin123"},
+        ConditionExpression="attribute_not_exists(config_id)"
+    )
+except:
+    pass
+
+# ================== SNS SETUP ==================
 try:
     topics = sns.list_topics()["Topics"]
     TOPIC_ARN = next(
         (t["TopicArn"] for t in topics if SNS_TOPIC_NAME in t["TopicArn"]), None
     )
     if not TOPIC_ARN:
-        topic = sns.create_topic(Name=SNS_TOPIC_NAME)
-        TOPIC_ARN = topic["TopicArn"]
-    print(f"Using SNS Topic: {TOPIC_ARN}")
+        TOPIC_ARN = sns.create_topic(Name=SNS_TOPIC_NAME)["TopicArn"]
+    print("SNS Topic:", TOPIC_ARN)
 except Exception as e:
-    print(f"SNS Init Error: {e}")
+    print("SNS error:", e)
     TOPIC_ARN = None
 
-
+# ================== COINGECKO ==================
 TOP_COINS_API = "https://api.coingecko.com/api/v3/coins/markets"
 SEARCH_API = "https://api.coingecko.com/api/v3/search"
+PRICE_API = "https://api.coingecko.com/api/v3/simple/price"
+
+SESSION = requests.Session()
+SESSION.headers.update({"User-Agent": "CryptoPriceTracker/1.0"})
+
+api_key = os.getenv("COINGECKO_API_KEY")
+if api_key:
+    header = "x-cg-demo-api-key" if api_key.startswith("CG-") else "x-cg-pro-api-key"
+    SESSION.headers.update({header: api_key})
 
 API_LOCK = threading.Lock()
 LAST_API_CALL = 0
 MIN_API_INTERVAL = 1.5
-SESSION = requests.Session()
-
-api_key = os.getenv("COINGECKO_API_KEY")
-if api_key:
-    header_name = "x-cg-demo-api-key" if api_key.startswith("CG-") else "x-cg-pro-api-key"
-    SESSION.headers.update({header_name: api_key})
 
 COIN_CACHE = {}
 CHART_CACHE = {}
 CACHE_TTL = 300
 
-def get_cached_coin(coin_id):
-    entry = COIN_CACHE.get(coin_id)
-    if entry and entry["expires"] > time.time():
-        return entry["data"]
-    return None
-
-def set_cached_coin(coin_id, data):
-    COIN_CACHE[coin_id] = {
-        "data": data,
-        "expires": time.time() + CACHE_TTL
-    }
-
-def get_cached_chart(coin_id):
-    entry = CHART_CACHE.get(coin_id)
-    if entry and entry["expires"] > time.time():
-        return entry["labels"], entry["values"]
-    return None, None
-
-def set_cached_chart(coin_id, labels, values):
-    CHART_CACHE[coin_id] = {
-        "labels": labels,
-        "values": values,
-        "expires": time.time() + CACHE_TTL
-    }
-
 def safe_get(url, params=None, timeout=10):
     global LAST_API_CALL
-    retries = 3
-    backoff = 2
-
-    for i in range(retries):
-        with API_LOCK:
-            now = time.time()
-            wait = MIN_API_INTERVAL - (now - LAST_API_CALL)
-            if wait > 0:
-                time.sleep(wait)
-            LAST_API_CALL = time.time()
-
-        response = SESSION.get(url, params=params, timeout=timeout)
-        
-        if response.status_code == 429:
-            print(f"Rate limited (429). Retrying in {backoff}s...")
-            time.sleep(backoff)
-            backoff *= 2
-            continue
-            
-        return response
-
-    return response
-
-
+    with API_LOCK:
+        wait = MIN_API_INTERVAL - (time.time() - LAST_API_CALL)
+        if wait > 0:
+            time.sleep(wait)
+        LAST_API_CALL = time.time()
+    return SESSION.get(url, params=params, timeout=timeout)
 
 def fetch_top_10_coins():
     try:
-        r = safe_get(
-            TOP_COINS_API,
-            params={
-                "vs_currency": "usd",
-                "order": "market_cap_desc",
-                "per_page": 10,
-                "page": 1
-            },
-            timeout=8
-        )
-        r.raise_for_status()
+        r = safe_get(TOP_COINS_API, {
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 10,
+            "page": 1
+        })
         return r.json()
-    except Exception as e:
-        print(f"Top coins error: {e}")
+    except:
         return []
 
 def search_any_coin(query):
     try:
-        r = safe_get(
-            SEARCH_API,
-            params={"query": query},
-            timeout=8
-        )
-        r.raise_for_status()
-        return r.json().get("coins", [])
+        return safe_get(SEARCH_API, {"query": query}).json().get("coins", [])
     except:
         return []
 
 def fetch_prices_for_coins(coins):
-    if not coins: return {}
+    if not coins:
+        return {}
     try:
-        r = safe_get(
-            "https://api.coingecko.com/api/v3/simple/price",
-            params={"ids": ",".join(coins), "vs_currencies": "usd"},
-            timeout=6
-        )
-        r.raise_for_status()
-        return r.json()
+        return safe_get(PRICE_API, {
+            "ids": ",".join(coins),
+            "vs_currencies": "usd"
+        }).json()
     except:
         return {}
 
+def fetch_coin_details(coin_id):
+    try:
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
+        return safe_get(url, params={"localization": "false", "tickers": "false", "community_data": "false", "developer_data": "false", "sparkline": "false"}).json()
+    except:
+        return None
 
+def fetch_coin_chart(coin_id, days=1):
+    try:
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+        data = safe_get(url, params={"vs_currency": "usd", "days": days}).json()
+        prices = data.get("prices", [])
+        return {
+            "labels": [datetime.fromtimestamp(p[0]/1000).strftime('%H:%M') for p in prices],
+            "values": [p[1] for p in prices]
+        }
+    except:
+        return {"labels": [], "values": []}
 
-def check_alerts_background():
+# ================== ALERT BACKGROUND ==================
+def check_alerts():
     while True:
         try:
-            if TOPIC_ARN:
-                
-                scan = alerts_table.scan()
-                alerts = scan.get("Items", [])
-                
-                if alerts:
-                    coins_to_check = list(set(a["coin"] for a in alerts))
-                    if coins_to_check:
-                        prices = fetch_prices_for_coins(coins_to_check)
-                        now = time.time()
-                        
-                        for alert in alerts:
-                            coin = alert["coin"]
-                            threshold = float(alert["threshold"]) 
-                            email = alert["email"]
-                            cooldown = float(alert.get("cooldown", 0))
-                            
-                            if coin in prices and "usd" in prices[coin]:
-                                current_price = prices[coin]["usd"]
-                                if current_price < threshold:
-                                    if now - cooldown > 3600:
-                                        message = (
-                                            f"Price Alert: {coin.title()} has dropped below ${threshold}!\n"
-                                            f"Current Price: ${current_price}\n"
-                                        )
-                                        try:
-                                            sns.publish(
-                                                TopicArn=TOPIC_ARN,
-                                                Message=message,
-                                                Subject=f"Price Alert: {coin.title()}",
-                                                MessageAttributes={
-                                                    "email": {"DataType": "String", "StringValue": email}
-                                                }
-                                            )
-                                            print(f"Alert sent to {email}")
-                                            
-                                            
-                                            alerts_table.update_item(
-                                                Key={"email": email, "coin": coin},
-                                                UpdateExpression="set cooldown = :c",
-                                                ExpressionAttributeValues={":c": int(now)}
-                                            )
-                                        except Exception as e:
-                                            print(f"Failed to publish SNS: {e}")
-
+            scan = alerts_table.scan()
+            alerts = scan.get("Items", [])
+            if alerts:
+                prices = fetch_prices_for_coins([a["coin"] for a in alerts])
+                now = int(time.time())
+                for a in alerts:
+                    price = prices.get(a["coin"], {}).get("usd")
+                    if price and price < float(a["threshold"]):
+                        if now - int(a.get("cooldown", 0)) > 3600:
+                            sns.publish(
+                                TopicArn=TOPIC_ARN,
+                                Subject=f"Price Alert: {a['coin']}",
+                                Message=f"{a['coin']} dropped below {a['threshold']}",
+                                MessageAttributes={
+                                    "email": {
+                                        "DataType": "String",
+                                        "StringValue": a["email"]
+                                    }
+                                }
+                            )
+                            alerts_table.update_item(
+                                Key={"email": a["email"], "coin": a["coin"]},
+                                UpdateExpression="SET cooldown = :c",
+                                ExpressionAttributeValues={":c": now}
+                            )
             time.sleep(60)
         except Exception as e:
-            print(f"Alert check failed: {e}")
+            print("Alert error:", e)
             time.sleep(60)
 
-threading.Thread(target=check_alerts_background, daemon=True).start()
+threading.Thread(target=check_alerts, daemon=True).start()
 
-
-
+# ================== ROUTES ==================
 @app.route("/")
 def index():
-    return render_template(
-        "index.html",
-        top_coins=fetch_top_10_coins(),
-        search_results=[]
-    )
+    return render_template("index.html",
+                           top_coins=fetch_top_10_coins(),
+                           search_results=[])
 
 @app.route("/search", methods=["POST"])
 def search():
-    query = request.form.get("search", "")
-    return render_template(
-        "index.html",
-        top_coins=fetch_top_10_coins(),
-        search_results=search_any_coin(query)
-    )
+    q = request.form.get("search", "")
+    return render_template("index.html",
+                           top_coins=fetch_top_10_coins(),
+                           search_results=search_any_coin(q))
 
 @app.route("/coin/<coin_id>")
 def coin_detail(coin_id):
-    fallback = get_cached_coin(coin_id)
-    coin = fallback or {
-        "id": coin_id,
-        "name": coin_id.replace("-", " ").title(),
-        "symbol": coin_id[:4].upper(),
-        "market_cap_rank": None,
-        "market_data": None
-    }
+    coin_data = fetch_coin_details(coin_id)
+    if not coin_data:
+        return redirect(url_for("index"))
     
-    if not fallback:
-        try:
-            r = safe_get(f"https://api.coingecko.com/api/v3/coins/{coin_id}")
-            if r.status_code == 200:
-                data = r.json()
-                coin = data
-                set_cached_coin(coin_id, data)
-        except:
-            pass
-
-    labels, values = get_cached_chart(coin_id)
-    if not labels:
-        try:
-            r = safe_get(
-                f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart",
-                params={"vs_currency": "usd", "days": 365}
-            )
-            if r.status_code == 200:
-                prices = r.json().get("prices", [])
-                if prices:
-                    from collections import defaultdict
-                    monthly = defaultdict(list)
-                    for ts, price in prices:
-                        month = datetime.fromtimestamp(ts / 1000).strftime("%b %Y")
-                        monthly[month].append(price)
-                    labels = list(monthly.keys())
-                    values = [round(sum(v) / len(v), 2) for v in monthly.values()]
-                    set_cached_chart(coin_id, labels, values)
-        except:
-            labels, values = [], []
-
+    chart_data = fetch_coin_chart(coin_id)
+    is_favorite = coin_id in session.get("favorites", [])
+    
     return render_template(
         "coin.html",
-        coin=coin,
-        labels=labels,
-        values=values,
-        is_favorite=coin_id in session.get("favorites", [])
+        coin=coin_data,
+        is_favorite=is_favorite,
+        labels=chart_data["labels"],
+        values=chart_data["values"]
     )
-
-
 
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
         email = request.form["email"]
-        user = {
+        users_table.put_item(Item={
             "username": request.form["username"],
             "email": email,
             "password": generate_password_hash(request.form["password"]),
             "created_at": datetime.utcnow().isoformat()
-        }
-
-        try:
-            users_table.put_item(Item=user)
-            
-            # Subscribe to SNS
-            if TOPIC_ARN:
-                sns.subscribe(
-                    TopicArn=TOPIC_ARN,
-                    Protocol="email",
-                    Endpoint=email,
-                    Attributes={"FilterPolicy": f'{{"email": ["{email}"]}}'}
-                )
-
-            return redirect(url_for("login"))
-        except Exception as e:
-            return render_template("signup.html", error=f"Error: {e}")
-
+        })
+        if TOPIC_ARN:
+            sns.subscribe(TopicArn=TOPIC_ARN, Protocol="email", Endpoint=email)
+        return redirect(url_for("login"))
     return render_template("signup.html")
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        res = users_table.get_item(
-            Key={"username": request.form["username"]}
-        )
-
+        res = users_table.get_item(Key={"username": request.form["username"]})
         user = res.get("Item")
-        if user and check_password_hash(
-            user["password"],
-            request.form["password"]
-        ):
+        if user and check_password_hash(user["password"], request.form["password"]):
             session["user"] = user["username"]
             return redirect(url_for("index"))
-
         return render_template("login.html", error="Invalid credentials")
-
     return render_template("login.html")
 
 @app.route("/logout")
@@ -389,122 +259,94 @@ def logout():
     session.clear()
     return redirect(url_for("index"))
 
-
-
 @app.route("/favorites")
 def favorites():
-    favorite_coins = session.get("favorites", [])
-    prices = fetch_prices_for_coins(favorite_coins)
-    return render_template("favorites.html", prices=prices, favorite_coins=favorite_coins)
+    favs = session.get("favorites", [])
+    prices = fetch_prices_for_coins(favs)
+    return render_template("favorites.html",
+                           prices=prices,
+                           favorite_coins=favs)
 
-@app.route("/add_favorite/<coin_id>")
-def add_favorite(coin_id):
+@app.route("/add_favorite/<coin>")
+def add_favorite(coin):
     session.setdefault("favorites", [])
-    if coin_id not in session["favorites"]:
-        session["favorites"].append(coin_id)
-        session.modified = True
+    if coin not in session["favorites"]:
+        session["favorites"].append(coin)
+    session.modified = True
     return redirect(url_for("favorites"))
 
-@app.route("/remove_favorite/<coin_id>")
-def remove_favorite(coin_id):
-    if "favorites" in session and coin_id in session["favorites"]:
-        session["favorites"].remove(coin_id)
+@app.route("/remove_favorite/<coin>")
+def remove_favorite(coin):
+    if "favorites" in session and coin in session["favorites"]:
+        session["favorites"].remove(coin)
         session.modified = True
     return redirect(url_for("favorites"))
 
 @app.route("/set_alert", methods=["POST"])
 def set_alert():
-    if "user" not in session: return redirect(url_for("login"))
-    
-  
-    res = users_table.get_item(Key={"username": session["user"]})
-    user = res.get("Item")
-    if not user or "email" not in user:
-        return redirect(url_for("favorites"))
-        
-    coin = request.form.get("coin")
-    threshold = request.form.get("threshold")
-    
-    if coin and threshold:
-        try:
-            threshold_val = str(float(threshold)) 
-            alerts_table.put_item(Item={
-                "email": user["email"],
-                "coin": coin,
-                "threshold": threshold_val,
-                "cooldown": 0
-            })
-            print(f"Alert set for {user['email']}: {coin} < {threshold}")
-        except Exception as e:
-            print(f"Set alert error: {e}")
-            pass
-            
+    if "user" not in session:
+        return redirect(url_for("login"))
+    user = users_table.get_item(
+        Key={"username": session["user"]}
+    ).get("Item")
+    alerts_table.put_item(Item={
+        "email": user["email"],
+        "coin": request.form["coin"],
+        "threshold": str(request.form["threshold"]),
+        "cooldown": 0
+    })
     return redirect(url_for("favorites"))
 
-
-@app.route("/admin", methods=["GET", "POST"])
+# ================== ADMIN ==================
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "POST":
-        # Fetch current credentials from DB
-        current_username = "admin"
-        current_password = "admin123"
-        try:
-            res = admin_config_table.get_item(Key={"config_id": "main"})
-            if "Item" in res:
-                current_username = res["Item"].get("username", "admin")
-                current_password = res["Item"].get("password", "admin123")
-        except Exception as e:
-            print(f"Error fetching admin creds: {e}")
-
-        if (
-            request.form["username"] == current_username and
-            request.form["password"] == current_password
-        ):
+        conf = admin_config_table.get_item(
+            Key={"config_id": "main"}
+        )["Item"]
+        if (request.form["username"] == conf["username"] and
+            request.form["password"] == conf["password"]):
             session["admin"] = True
             return redirect(url_for("admin_dashboard"))
-
         return render_template("admin_login.html", error="Invalid credentials")
-
     return render_template("admin_login.html")
 
 @app.route("/admin/dashboard")
 def admin_dashboard():
     if not session.get("admin"):
         return redirect(url_for("admin_login"))
-
-    scan = users_table.scan()
-    users = scan.get("Items", [])
-
-    return render_template(
-        "admin.html",
-        users=users,
-        total_users=len(users)
-    )
+    users = users_table.scan().get("Items", [])
+    return render_template("admin.html",
+                           users=users,
+                           total_users=len(users))
 
 @app.route("/admin/update_credentials", methods=["POST"])
-def update_credentials():
+def admin_update_credentials():
     if not session.get("admin"):
         return redirect(url_for("admin_login"))
-        
-    new_username = request.form.get("new_username", "").strip()
-    new_password = request.form.get("new_password", "").strip()
+
+    new_username = request.form.get("new_username")
+    new_password = request.form.get("new_password")
     
-    if new_username or new_password:
+    update_expr = []
+    expr_attr_vals = {}
+    
+    if new_username:
+        update_expr.append("username = :u")
+        expr_attr_vals[":u"] = new_username
+    if new_password:
+        update_expr.append("password = :p")
+        expr_attr_vals[":p"] = new_password
+        
+    if update_expr:
         try:
-            # First get current to preserve what's not changing
-            res = admin_config_table.get_item(Key={"config_id": "main"})
-            item = res.get("Item", {"config_id": "main", "username": "admin", "password": "admin123"})
-            
-            if new_username:
-                item["username"] = new_username
-            if new_password:
-                item["password"] = new_password
-                
-            admin_config_table.put_item(Item=item)
-            print("Admin credentials updated")
+            admin_config_table.update_item(
+                Key={"config_id": "main"},
+                UpdateExpression="SET " + ", ".join(update_expr),
+                ExpressionAttributeValues=expr_attr_vals
+            )
         except Exception as e:
-            print(f"Error updating admin creds: {e}")
+            print(f"Error updating admin config: {e}")
             
     return redirect(url_for("admin_dashboard"))
 
@@ -513,7 +355,6 @@ def admin_logout():
     session.pop("admin", None)
     return redirect(url_for("admin_login"))
 
-
-
+# ================== RUN ================== 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

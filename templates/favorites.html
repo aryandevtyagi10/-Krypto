@@ -18,18 +18,23 @@
     <div class="top-bar">
         <a href="/" class="auth-btn">Home</a>
         <a href="/favorites" class="auth-btn" style="background: rgba(255,255,255,0.2); color:white;">Favorites</a>
-        <a href="/login" class="auth-btn">Login</a>
-        <a href="/signup" class="auth-btn secondary">Sign Up</a>
+        {% if session.get('user') %}
+            <span class="auth-btn" style="background:transparent; cursor:default;">{{ session.user }}</span>
+            <a href="/logout" class="auth-btn secondary">Logout</a>
+        {% else %}
+            <a href="/login" class="auth-btn">Login</a>
+            <a href="/signup" class="auth-btn secondary">Sign Up</a>
+        {% endif %}
     </div>
 
     <h1 class="app-title">⭐ My Favorites</h1>
 
-    {% if favorite_coins and favorite_coins|length > 0 %}
+    {% if favorite_coins %}
     <table>
         <tr>
             <th>Cryptocurrency</th>
             <th>Price (USD)</th>
-            <th>Action</th>
+            <th>Actions</th>
         </tr>
         {% for coin in favorite_coins %}
         <tr>
@@ -37,7 +42,7 @@
                 <a href="/coin/{{ coin }}">{{ coin | capitalize }}</a>
             </td>
             <td>
-                {% if prices[coin] is defined and prices[coin].usd is defined %}
+                {% if prices[coin] is defined and prices[coin].usd is not none %}
                     ${{ "{:,.2f}".format(prices[coin].usd) }}
                 {% else %}
                     N/A

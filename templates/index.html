@@ -12,8 +12,13 @@
     <!-- TOP RIGHT AUTH BUTTONS -->
     <div class="top-bar">
         <a href="/favorites" class="auth-btn">Favorites</a>
-        <a href="/login" class="auth-btn">Login</a>
-        <a href="/signup" class="auth-btn secondary">Sign Up</a>
+        {% if session.get('user') %}
+            <span class="auth-btn" style="background:transparent; cursor:default;">Hello, {{ session.user }}</span>
+            <a href="/logout" class="auth-btn secondary">Logout</a>
+        {% else %}
+            <a href="/login" class="auth-btn">Login</a>
+            <a href="/signup" class="auth-btn secondary">Sign Up</a>
+        {% endif %}
         <a href="/admin/login" class="auth-btn">Admin</a>
     </div>
 
@@ -47,7 +52,13 @@
                     {{ coin.name }} ({{ coin.symbol | upper }})
                 </a>
             </td>
-            <td>${{ "{:,.2f}".format(coin.current_price) }}</td>
+            <td>
+                {% if coin.current_price %}
+                    ${{ "{:,.2f}".format(coin.current_price) }}
+                {% else %}
+                    N/A
+                {% endif %}
+            </td>
         </tr>
         {% endfor %}
     </table>
