@@ -7,6 +7,20 @@
 </head>
 
 <body>
+    {% if request.args.get('logged_out_user') %}
+    <div class="notification" id="logoutNotification">
+        {{ request.args.get('logged_out_user') }} has logged out
+    </div>
+    <script>
+        setTimeout(function() {
+            var notif = document.getElementById('logoutNotification');
+            if (notif) {
+                notif.style.opacity = '0';
+                setTimeout(function() { notif.remove(); }, 500);
+            }
+        }, 5000);
+    </script>
+    {% endif %}
 <div class="container">
 
     <!-- TOP RIGHT AUTH BUTTONS -->

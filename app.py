@@ -221,8 +221,9 @@ def login():
 
 @app.route("/logout")
 def logout():
+    username = session.get("user", "User")
     session.clear()
-    return redirect(url_for("index"))
+    return redirect(url_for("index", logged_out_user=username))
 
 @app.route("/favorites")
 def favorites():
@@ -232,6 +233,8 @@ def favorites():
 
 @app.route("/add_favorite/<coin_id>")
 def add_favorite(coin_id):
+    if "user" not in session:
+        return redirect(url_for("login"))
     session.setdefault("favorites", [])
     if coin_id not in session["favorites"]:
         session["favorites"].append(coin_id)
