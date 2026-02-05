@@ -60,7 +60,7 @@ git clone https://github.com/aryandevtyagi10/-Krypto.git
 cd -Krypto
 ```
 
-##🧰 Create Virtual Environment
+## 🧰 Create Virtual Environment
 ```
 python -m venv venv
 ```
